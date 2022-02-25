@@ -1,0 +1,174 @@
+version: '3'
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+
+  # Broker 1
+  kafka1:
+    image: confluentinc/cp-kafka:latest
+    container_name: broker_kafka1
+    ports:
+      - '9092:9092'
+      - '29092:29092'
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_LISTENERS: INTERNAL://:9092,OUTSIDE://:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://broker_kafka1:9092,OUTSIDE://host.docker.internal:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    extra_hosts:
+      - "host.docker.internal:172.17.0.1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  # Broker 2
+  kafka2:
+    image: confluentinc/cp-kafka:latest
+    container_name: broker_kafka2
+    ports:
+      - '9093:9093'
+      - '29093:29093'
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_LISTENERS: INTERNAL://:9093,OUTSIDE://:29093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://broker_kafka2:9093,OUTSIDE://host.docker.internal:29093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    extra_hosts:
+      - "host.docker.internal:172.17.0.1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  # Broker 3
+  kafka3:
+    image: confluentinc/cp-kafka:latest
+    container_name: broker_kafka3
+    ports:
+      - '9094:9094'
+      - '29094:29094'
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_LISTENERS: INTERNAL://:9094,OUTSIDE://:29094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://broker_kafka3:9094,OUTSIDE://host.docker.internal:29094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    extra_hosts:
+      - "host.docker.internal:172.17.0.1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  kafka-topics-generator:
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - kafka1
+      - kafka2
+      - kafka3
+    command: >
+      bash -c
+      "sleep 5s &&
+      kafka-topics --create --topic=gamestore --if-not-exists --partitions 3 --replication-factor 3 --bootstrap-server=broker_kafka1:9092"
+
+  control-center:
+    image: confluentinc/cp-enterprise-control-center:6.0.1
+    container_name: control-center
+    hostname: control-center
+    depends_on:
+      - kafka1
+      - kafka2
+      - kafka3
+    ports:
+      - "9021:9021"
+    environment:
+      CONTROL_CENTER_BOOTSTRAP_SERVERS: 'host.docker.internal:29092,host.docker.internal:29093,host.docker.internal:29094'
+      CONTROL_CENTER_REPLICATION_FACTOR: 1
+      CONTROL_CENTER_INTERNAL_TOPICS_PARTITIONS: 1
+      CONTROL_CENTER_MONITORING_INTERCEPTOR_TOPIC_PARTITIONS: 1
+      CONFLUENT_METRICS_TOPIC_REPLICATION: 1
+      PORT: 9021
+    extra_hosts:
+      - "host.docker.internal:172.17.0.1"
+
+  mongodb:
+    image: mongo
+    container_name: mongodb
+    restart: always
+    env_file: ./.env
+    environment:
+      - MONGO_INITDB_DATABASE=$MONGODB_DATABASE
+      - MONGO_INITDB_ROOT_USERNAME=$MONGODB_USER
+      - MONGO_INITDB_ROOT_PASSWORD=$MONGODB_PASSWORD
+    ports:
+      - $MONGODB_LOCAL_PORT:$MONGODB_DOCKER_PORT
+    expose:
+      - $MONGODB_LOCAL_PORT
+    volumes:
+      - db:/data/db
+    networks:
+      - backend-network
+
+  gamestore-producer-backend:
+    image: mhramos/gamestore-producer-backend:latest
+    container_name: gamestore-producer-backend
+    hostname: gamestore-producer-backend
+    environment:
+      SPRING_KAFKA_BOOTSTRAPSERVERS: host.docker.internal:29092,host.docker.internal:29093,host.docker.internal:29094
+    ports:
+      - "8080:8080"
+    depends_on:
+      - kafka1
+      - kafka2
+      - kafka3
+      - zookeeper
+    extra_hosts:
+      - "host.docker.internal:172.17.0.1"
+
+  gamestore-consumer-backend:
+    image: mhramos/gamestore-consumer-backend:latest
+    container_name: gamestore-consumer-backend
+    hostname: gamestore-consumer-backend
+    env_file: ./.env
+    ports:
+      - "8081:8081"
+    links:
+      - mongodb
+    depends_on:
+      - zookeeper
+      - mongodb
+    environment:
+      - DB_HOST=$MONGODB_HOST_DOCKER
+      - DB_USER=$MONGODB_USER
+      - DB_PASSWORD=$MONGODB_PASSWORD
+      - DB_NAME=$MONGODB_DATABASE
+      - DB_PORT=$MONGODB_DOCKER_PORT
+      - SPRING_KAFKA_BOOTSTRAPSERVERS=host.docker.internal:29092,host.docker.internal:29093,host.docker.internal:29094
+    stdin_open: true
+    tty: true
+    networks:
+      - backend-network
+    extra_hosts:
+      - "host.docker.internal:172.17.0.1"
+
+volumes:
+  db:
+
+networks:
+  backend-network:
+    driver: bridge

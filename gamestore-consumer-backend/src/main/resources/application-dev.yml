@@ -1,0 +1,19 @@
+server:
+  port: 8081
+data:
+  mongodb:
+    host: localhost
+    port: 27017
+    database: gamestorekafka
+kafka:
+  template:
+    default-topic: gamestore
+  consumer:
+    bootstrap-servers: localhost:29092,localhost:29093,localhost:29094
+    group-id: gamestore-listener-group
+    key-deserializer: org.apache.kafka.common.serialization.StringSerializer
+    value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+  producer:
+    bootstrap-servers: localhost:29092,localhost:29093,localhost:29094
+    key-serializer: org.apache.kafka.common.serialization.StringSerializer
+    value-serializer: org.apache.kafka.common.serialization.StringSerializer
